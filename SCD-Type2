@@ -1,0 +1,113 @@
+# Databricks notebook source
+from pyspark.sql.types import *
+from pyspark.sql.functions import *
+import pandas as pd
+from datetime import date, timedelta
+from dateutil.relativedelta import relativedelta
+from delta.tables import *
+from pyspark.sql import SQLContext
+
+# COMMAND ----------
+
+  %sql
+  
+  CREATE TABLE Customer_data (
+  Customer_id INT NOT NULL,
+  Customer_loc varchar(20),
+  Customer_loc_area varchar(1) not null,
+  Customer_effective_date date,
+  Customer_exp_date date
+  )
+
+# COMMAND ----------
+
+  %sql TRUNCATE TABLE Customer_data 
+
+# COMMAND ----------
+
+  %sql --insert into Customer_data values(125, "US, LA", 'T', "2018-02-01",null)
+    insert into Customer_data values(125, "USA, LAS Vegas", 'B', "2020-09-28",null);
+    insert into Customer_data values(126, "UK, LAS Vegas", 'B', "2020-09-28",null)
+
+# COMMAND ----------
+
+  %sql select * from Customer_data
+
+# COMMAND ----------
+
+df_update=spark.table("Customer_data")
+
+display(df_update)
+
+# COMMAND ----------
+
+df_update.write.format("delta").mode("overwrite").option("overwriteSchema", "true").save("dbfs:/mnt/Customer_data")
+display(spark.sql("DROP TABLE IF EXISTS Customer_data_final"))
+#display(spark.sql("TRUNCATE TABLE Customer_data_final"))
+display(spark.sql("CREATE TABLE Customer_data_final USING DELTA LOCATION 'dbfs:/mnt/Customer_data'"))
+
+# COMMAND ----------
+
+  %sql select * from Customer_data_final
+
+# COMMAND ----------
+
+  %sql 
+  
+  MERGE INTO Customer_data_final
+  USING (
+  
+     
+    SELECT Customer_data.Customer_id as mergeKey, Customer_data.*
+    FROM Customer_data
+    
+    UNION 
+    
+   
+    SELECT NULL as mergeKey, Customer_data.*
+    
+    FROM Customer_data JOIN Customer_data_final
+    
+    ON Customer_data.Customer_id = Customer_data_final.Customer_id 
+    
+    WHERE Customer_data_final.Customer_exp_date IS NULL
+     and (
+    Customer_data.Customer_loc <> Customer_data_final.Customer_loc 
+    OR
+    Customer_data.Customer_loc_area <> Customer_data_final.Customer_loc_area 
+    )
+    
+  ) X
+  
+  ON Customer_data_final.Customer_id = mergeKey
+  
+  WHEN MATCHED AND Customer_data_final.Customer_loc <> X.Customer_loc 
+    or
+    Customer_data_final.Customer_loc_area <> X.Customer_loc_area 
+   THEN  
+    UPDATE SET 
+    Customer_exp_date = X.Customer_effective_date    
+  WHEN NOT MATCHED THEN 
+    INSERT(
+    Customer_id, 
+    Customer_loc, 
+    Customer_loc_area, 
+    Customer_effective_date, 
+    Customer_exp_date
+    ) 
+    VALUES(
+    X.Customer_id,
+    X.Customer_loc, 
+    X.Customer_loc_area,
+    X.Customer_effective_date,
+    null
+    )  
+
+# COMMAND ----------
+
+  %sql SELECT * FROM  Customer_data_final  
+    
+
+# COMMAND ----------
+
+
